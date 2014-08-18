@@ -1,7 +1,7 @@
 #ifndef TYPE_H_
 #define TYPE_H_
 
-
+#include <arpa/inet.h>
 
 /* default snap length (maximum bytes per packet to capture) */
 #define SNAP_LEN 1518
@@ -11,6 +11,9 @@
 
 /* Ethernet addresses are 6 bytes */
 #define ETHER_ADDR_LEN	6
+
+/* Length of Nic Dir */
+#define NIC_DIR_LEN 25
 
 /* Ethernet header */
 struct sniff_ethernet {
