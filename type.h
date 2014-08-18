@@ -10,7 +10,9 @@
 #define SIZE_ETHERNET 14
 
 /* Ethernet addresses are 6 bytes */
+#ifndef ETHER_ADDR_LEN
 #define ETHER_ADDR_LEN	6
+#endif
 
 /* Length of Nic Dir */
 #define NIC_DIR_LEN 25
