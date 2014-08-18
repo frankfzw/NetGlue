@@ -5,9 +5,12 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <stdlib.h>
 
-#include "type.h"
+//#include "type.h"
 #include "capture.h"
+#include "glue.h"
+
 
 
 //host nic netmask and address
@@ -25,12 +28,17 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 
     struct sniff_ethernet *ethernet;
     struct sniff_ip *ip;
-    struct sniff_tcp *tcp;
+    //struct sniff_tcp *tcp;
 
     printf("Packet Number %d: \n", count);
     count ++;
 
     ethernet = (struct sniff_ethernet*)(packet);
+
+    //test
+    printf("ethernet addr: %x:%x:%x:%x:%x:%x\n", 
+        ethernet->ether_shost[0], ethernet->ether_shost[1], ethernet->ether_shost[2], ethernet->ether_shost[3], ethernet->ether_shost[4], ethernet->ether_shost[5]);
+
     ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);
 
     int size_ip = IP_HL(ip) * 4;
@@ -62,13 +70,14 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
     }
 
     //change the packet to SCION-like one
-
+    //1. convert source address of ethernet frame
+    changeMAC(ethernet, nic2MAC);
     
 
 
 }
 
-void getMAC(char *dev, char *MAC)
+void getMAC(char *dev, u_char *MAC)
 {
     FILE *file;
     char nicDir[NIC_DIR_LEN];
@@ -76,9 +85,35 @@ void getMAC(char *dev, char *MAC)
     strcat(nicDir, dev);
     strcat(nicDir, "/address");
     file = fopen(nicDir, "r");
-    fscanf(file, "%s", MAC);
+    char *buf = (char *)malloc(17 * sizeof(char));
+    char *temp = buf;
+    fscanf(file, "%s", buf);
     fclose(file);
-    printf("MAC address of %s: %s\n", dev, MAC);
+    //printf("MAC address of %s: %c%c%c%c\nsizof: %d\n", dev, temp[0], temp[1], temp[2], temp[3], (int)strlen(temp));
+
+    //convert to hex
+    memset(MAC, 0, ETHER_ADDR_LEN);
+
+    int i = 0;
+    int len = (int)strlen(temp);
+    for (; i < len; i += 3)
+    {
+        temp[i+2] = '\0';
+        int mac_byte;
+        sscanf(buf, "%x", &mac_byte);
+        unsigned char mac = mac_byte & 0xff;
+        //printf("\ttest: %x\n", mac);
+        MAC[i/3] = mac;
+        //printf("MAC addr test: %d: %x\n", i/3, MAC[i/3]);
+        buf += 3 * sizeof(char);
+    }
+
+    printf("MAC address of %s: %x:%x:%x:%x:%x:%x\n", dev, 
+        MAC[0], MAC[1], MAC[2], MAC[3], MAC[4], MAC[5]);
+
+    free(temp);
+
+
 }
 
 int main(int argc, char *argv[])
@@ -117,7 +152,7 @@ int main(int argc, char *argv[])
 
     if (pcap_lookupnet(dev2, &_2ndNet, &_2ndMask, errbuf) == -1) 
     {
-         fprintf(stderr, "Can't get netmask for nic2 %s\n", dev);
+         fprintf(stderr, "Can't get netmask for nic2 %s\n", dev2);
          _2ndNet = 0;
          _2ndMask = 0;
     }

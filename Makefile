@@ -1,5 +1,6 @@
-CCFLAGS = -Wall -g
-LDFLAGS = -Wall -g
+CFLAGS = -Wall -g
+LFLAGS = -Wall -g
+CC = g++
 
 TARGETS = capture
 
@@ -7,12 +8,14 @@ TARGETS = capture
 all: $(TARGETS)
 
 .cc.o:
-	gcc $(CCFLAGS) -c -o $@ $<
+	$(CC) $(CFLAGS) -c -o $@ $<
 
-capture.o:	capture.h type.h
+capture.o:	capture.h type.h glue.h
 
-capture:	capture.o
-	gcc $(LDFLAGS) -o $@ $^ -lpcap
+glue.o:		type.h glue.h
+
+capture:	capture.o glue.o
+	$(CC) $(LFLAGS) -o $@ $^ -lpcap
 
 
 clean:
