@@ -7,7 +7,6 @@
 #include <arpa/inet.h>
 #include <stdlib.h>
 
-#include "type.h"
 #include "capture.h"
 #include "glue.h"
 
@@ -74,7 +73,7 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
     //1. convert source address of ethernet frame
     changeMAC(ethernet, nic2MAC);
 
-    //2. convert source IP address of ip packet
+    //2. convert source IP address of ip packet and recalculate ip checksum
     changeIP(ip, (unsigned long)_2ndNet);
     
 
