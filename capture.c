@@ -72,7 +72,7 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 
     //change the packet to SCION-like one
     //1. convert source address of ethernet frame
-    //changeMAC(ethernet, nic2MAC);
+    changeMAC(ethernet, nic2MAC);
 
     //2. convert source IP address of ip packet
     changeIP(ip, (unsigned long)_2ndNet);
