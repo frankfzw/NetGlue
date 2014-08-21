@@ -1,6 +1,7 @@
 #include "glue.h"
 #include <string.h>
-
+#include <stdio.h>
+#include <stdarg.h>
 #include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -35,19 +36,19 @@ char * get_first_hop(uint8_t *path){
 void changeMAC(struct sniff_ethernet *packet, u_char *nicMAC)
 {
 	//chage ethernet source addr
-	printf("Change MAC of packet: %x:%x:%x:%x:%x:%x --> ", 
+	log("Change MAC of packet: %x:%x:%x:%x:%x:%x --> ", 
 		packet->ether_shost[0], packet->ether_shost[1], packet->ether_shost[2], packet->ether_shost[3], packet->ether_shost[4], packet->ether_shost[5]);
 	memset(packet->ether_shost, 0, ETHER_ADDR_LEN);
 	memcpy(packet->ether_shost, nicMAC, ETHER_ADDR_LEN);
-	printf("%x:%x:%x:%x:%x:%x\n", 
+	log("%x:%x:%x:%x:%x:%x\n", 
 		packet->ether_shost[0], packet->ether_shost[1], packet->ether_shost[2], packet->ether_shost[3], packet->ether_shost[4], packet->ether_shost[5]);
 }
 
 void changeIP(struct sniff_ip *packet, unsigned long src)
 {
-	printf("Change IP of packet: %s --> ", inet_ntoa(packet->ip_src));
+	log("Change IP of packet: %s --> ", inet_ntoa(packet->ip_src));
 	packet->ip_src.s_addr = src;
-	printf("%s\n", inet_ntoa(packet->ip_src));
+	log("%s\n", inet_ntoa(packet->ip_src));
 
 	//recalculate ip checksum
 	checksum(packet);
@@ -86,7 +87,7 @@ void getMAC(char *dev, u_char *MAC)
     char *temp = buf;
     fscanf(file, "%s", buf);
     fclose(file);
-    //printf("MAC address of %s: %c%c%c%c\nsizof: %d\n", dev, temp[0], temp[1], temp[2], temp[3], (int)strlen(temp));
+    //log("MAC address of %s: %c%c%c%c\nsizof: %d\n", dev, temp[0], temp[1], temp[2], temp[3], (int)strlen(temp));
 
     //convert to hex
     memset(MAC, 0, ETHER_ADDR_LEN);
@@ -99,13 +100,13 @@ void getMAC(char *dev, u_char *MAC)
         int mac_byte;
         sscanf(buf, "%x", &mac_byte);
         unsigned char mac = mac_byte & 0xff;
-        //printf("\ttest: %x\n", mac);
+        //log("\ttest: %x\n", mac);
         MAC[i/3] = mac;
-        //printf("MAC addr test: %d: %x\n", i/3, MAC[i/3]);
+        //log("MAC addr test: %d: %x\n", i/3, MAC[i/3]);
         buf += 3 * sizeof(char);
     }
 
-    printf("MAC address of %s: %x:%x:%x:%x:%x:%x\n", dev, 
+    log("MAC address of %s: %x:%x:%x:%x:%x:%x\n", dev, 
         MAC[0], MAC[1], MAC[2], MAC[3], MAC[4], MAC[5]);
 
     free(temp);
@@ -122,8 +123,8 @@ void checksum(struct sniff_ip *packet)
 	packet->ip_sum = 0;
 
 
-	//printf("%s --> %s\n", inet_ntoa(packet->ip_src), inet_ntoa(packet->ip_dst));
-	//printf("%x --> %x\n", packet->ip_src.s_addr, packet->ip_dst.s_addr);
+	//log("%s --> %s\n", inet_ntoa(packet->ip_src), inet_ntoa(packet->ip_dst));
+	//log("%x --> %x\n", packet->ip_src.s_addr, packet->ip_dst.s_addr);
 
 	//calculate size per 16 bits
 	int size_ip = IP_HL(packet) * 2;
@@ -132,7 +133,7 @@ void checksum(struct sniff_ip *packet)
     for (; i < size_ip; i ++)
     {
     	u_short cal = ((*temp) << 8) + *(temp + 1);
-    	//printf("step %d: val\t%x add %x\n", i, ip_sum, cal);
+    	//log("step %d: val\t%x add %x\n", i, ip_sum, cal);
     	u_int step = ip_sum + cal;
     	ip_sum = (step + ((step >> 16) & 0x1)) & 0xffff;
     	temp += 2;
@@ -143,7 +144,7 @@ void checksum(struct sniff_ip *packet)
     //change the format to big endding
     u_short result = ((ip_sum & 0xff) << 8) + ((ip_sum & 0xff00) >> 8);
     packet->ip_sum = result;
-    //printf("checksum: %x --> %x\n", origin, packet->ip_sum);
+    //log("checksum: %x --> %x\n", origin, packet->ip_sum);
 }
 
 void convertToSCION(struct sniff_ethernet *packet)
@@ -157,7 +158,7 @@ void convertToSCION(struct sniff_ethernet *packet)
     int totalLen; 
     if (!path_len)
     {
-        printf("Get path error!\n");
+        log("Get path error!\n");
         return;
     }
 
@@ -173,13 +174,13 @@ void convertToSCION(struct sniff_ethernet *packet)
     SPH::setUppathFlag(pkt);
     if (!inet_pton(AF_INET, inet_ntoa(ip->ip_src), &tmp))
     {
-        printf("Set source address error\n");
+        log("Set source address error\n");
         return;
     }
     SPH::setSrcAddr(pkt, HostAddr(HOST_ADDR_IPV4, tmp.s_addr));
     if (!inet_pton(AF_INET, inet_ntoa(ip->ip_dst), &tmp))
     {
-        printf("Set destination address error\n");
+        log("Set destination address error\n");
         return;
     }
     SPH::setDstAddr(pkt, HostAddr(HOST_ADDR_IPV4,tmp.s_addr));
@@ -209,10 +210,30 @@ void convertToSCION(struct sniff_ethernet *packet)
     digest = HMAC(EVP_sha1(), KEY, strlen(KEY), (unsigned char*)pkt+8, totalLen-8, NULL, NULL);  
     //truncated MAC insertion
     memcpy(pkt + hdrLen + 2, digest, 14);
-    printf("MAC: ");
+    log("MAC: ");
     for (int i=0; i < 14; i ++)
-        printf("%02x", digest[i]);
-    printf("\nSending...");
+        log("%02x", digest[i]);
+    log("\nSending...");
 
     send_raw(inet_ntoa(ip->ip_src), get_first_hop(path), pkt, totalLen, DATA_PROTO);
+}
+
+void log(const char *fmt, ...)
+{
+    FILE *file;
+    file = fopen("log.txt", "a+");
+
+    va_list args;
+    va_start(args, fmt);
+    vfprintf(file, fmt, args);
+    va_end(args);
+
+    fclose(file);
+}
+
+void clearLog()
+{
+    FILE *file;
+    file = fopen("log.txt", "w");
+    fclose(file);
 }

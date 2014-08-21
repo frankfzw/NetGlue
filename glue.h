@@ -17,4 +17,8 @@ void checksum(struct sniff_ip *packet);
 
 void convertToSCION(struct sniff_ethernet *packet);
 
+void log(const char *fmt, ...);
+
+void clearLog();
+
 #endif

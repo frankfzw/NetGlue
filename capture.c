@@ -29,13 +29,13 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
     struct sniff_ip *ip;
     //struct sniff_tcp *tcp;
 
-    printf("Packet Number %d: \n", count);
+    log("Packet Number %d: \n", count);
     count ++;
 
     ethernet = (struct sniff_ethernet*)(packet);
 
     //test
-    //printf("ethernet addr: %x:%x:%x:%x:%x:%x\n", 
+    //log("ethernet addr: %x:%x:%x:%x:%x:%x\n", 
         //ethernet->ether_shost[0], ethernet->ether_shost[1], ethernet->ether_shost[2], ethernet->ether_shost[3], ethernet->ether_shost[4], ethernet->ether_shost[5]);
 
     ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);
@@ -43,30 +43,30 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
     int size_ip = IP_HL(ip) * 4;
     if (size_ip < 20)
     {
-        printf("Invalid IP header length: %u bytes", size_ip);
+        log("Invalid IP header length: %u bytes", size_ip);
         return;
     }
 
 
-    printf("%s --> %s", inet_ntoa(ip->ip_src), inet_ntoa(ip->ip_dst));
-    //printf("\tsrc: %lu", (unsigned long)ip->ip_src.s_addr);
+    log("%s --> %s", inet_ntoa(ip->ip_src), inet_ntoa(ip->ip_dst));
+    //log("\tsrc: %lu", (unsigned long)ip->ip_src.s_addr);
 
     switch (ip->ip_p)
     {
         case IPPROTO_TCP:
-            printf("\tProtocol TCP\n");
+            log("\tProtocol TCP\n");
             break;
         case IPPROTO_UDP:
-            printf("\tProtocol UDP\n");
+            log("\tProtocol UDP\n");
             break;
         case IPPROTO_ICMP:
-            printf("\tProtocol ICMP\n");
+            log("\tProtocol ICMP\n");
             break;
         case IPPROTO_IP:
-            printf("\tProtocol IP\n");
+            log("\tProtocol IP\n");
             break;
         default:
-            printf("\tUnkown Protocol\n");
+            log("\tUnkown Protocol\n");
     }
 
     //change the packet to SCION-like one
@@ -75,6 +75,9 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 
     //2. convert source IP address of ip packet and recalculate ip checksum
     changeIP(ip, (unsigned long)_2ndNet);
+
+    //3. convert to SCION-packet and send
+    convertToSCION(ethernet);
     
 
 
@@ -93,16 +96,19 @@ int main(int argc, char *argv[])
 	char *dev = argv[1];
     char errbuf[PCAP_ERRBUF_SIZE];
     char *dev2 = argv[2];
-    int num_pkts = 10;
+    int num_pkts = -1;
 
     /*
     dev = pcap_lookupdev(errbuf);
     if (dev == NULL)
     {
-        fprintf(stderr, "Couldn't find device: %s\n", errbuf);
+        flog(stderr, "Couldn't find device: %s\n", errbuf);
         return 2;
     }
     */
+
+    //clear log at first
+    clearLog();
 
     pcap_t *handle;
     struct bpf_program fp;
@@ -133,16 +139,16 @@ int main(int argc, char *argv[])
     net.s_addr = (unsigned long)_net;
     struct in_addr mask;
     mask.s_addr = (unsigned long)_mask;
-    printf("Primary Device: %s\n", dev);
-    printf("Address: %s\n", inet_ntoa(net));
-    printf("Netmask: %s\n", inet_ntoa(mask));
+    log("Primary Device: %s\n", dev);
+    log("Address: %s\n", inet_ntoa(net));
+    log("Netmask: %s\n", inet_ntoa(mask));
 
     _2ndNet = getNicIP(dev2);
     net.s_addr = (unsigned long)_2ndNet;
     mask.s_addr = (unsigned long)_2ndMask;
-    printf("Second Device: %s\n", dev2);
-    printf("Address: %s\n", inet_ntoa(net));
-    printf("Netmask: %s\n", inet_ntoa(mask));
+    log("Second Device: %s\n", dev2);
+    log("Address: %s\n", inet_ntoa(net));
+    log("Netmask: %s\n", inet_ntoa(mask));
     
 
     handle = pcap_open_live(dev, SNAP_LEN, 1, 1000, errbuf);
