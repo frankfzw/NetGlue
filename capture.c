@@ -21,54 +21,61 @@ bpf_u_int32 _2ndMask;
 u_char nic1MAC[ETHER_ADDR_LEN];
 u_char nic2MAC[ETHER_ADDR_LEN];
 
-void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
+
+void filterOut(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
 {
-    static int count = 1;
+    static int count = 1;                   /* packet counter */
+    
+    /* declare pointers to packet headers */
+    struct sniff_ethernet *ethernet;  /* The ethernet header [1] */
+    struct sniff_ip *ip;              /* The IP header */
 
-    struct sniff_ethernet *ethernet;
-    struct sniff_ip *ip;
-    //struct sniff_tcp *tcp;
-
-    log("Packet Number %d: \n", count);
-    count ++;
-
+    int size_ip;
+    //int size_tcp;
+    
+    printf("\nPacket number %d:\n", count);
+    count++;
+    
+    /* define ethernet header */
     ethernet = (struct sniff_ethernet*)(packet);
-
-    //test
-    //log("ethernet addr: %x:%x:%x:%x:%x:%x\n", 
-        //ethernet->ether_shost[0], ethernet->ether_shost[1], ethernet->ether_shost[2], ethernet->ether_shost[3], ethernet->ether_shost[4], ethernet->ether_shost[5]);
-
+    printETH(ethernet);
+    
+    /* define/compute ip header offset */
     ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);
-
-    int size_ip = IP_HL(ip) * 4;
-    if (size_ip < 20)
-    {
-        log("Invalid IP header length: %u bytes", size_ip);
+    size_ip = IP_HL(ip)*4;
+    if (size_ip < 20) {
+        printf("* Invalid IP header length: %u bytes\n", size_ip);
         return;
     }
 
+    /* print source and destination IP addresses */
+    printIP(ip);
 
-    log("%s --> %s", inet_ntoa(ip->ip_src), inet_ntoa(ip->ip_dst));
-    //log("\tsrc: %lu", (unsigned long)ip->ip_src.s_addr);
-
-    switch (ip->ip_p)
-    {
+    /* determine protocol */    
+    switch(ip->ip_p) {
         case IPPROTO_TCP:
-            log("\tProtocol TCP\n");
+            printf("Protocol: TCP\n");
+            printTCP((struct sniff_tcp *)(ip + sizeof(struct sniff_ip)));
             break;
         case IPPROTO_UDP:
-            log("\tProtocol UDP\n");
+            printf("Protocol: UDP\n");
+            printUDP((struct udphdr *)(ip + sizeof(struct sniff_ip)));
             break;
         case IPPROTO_ICMP:
-            log("\tProtocol ICMP\n");
+            printf("Protocol: ICMP\n");
+            printICMP((struct icmp6_hdr *)(ip + sizeof(struct sniff_ip)));
             break;
         case IPPROTO_IP:
-            log("\tProtocol IP\n");
+            printf("Protocol: IP\n");
             break;
         default:
-            log("\tUnkown Protocol\n");
+            printf("Protocol: unknown\n");
+            break;
     }
 
+
+
+    
     //change the packet to SCION-like one
     //1. convert source address of ethernet frame
     changeMAC(ethernet, nic2MAC);
@@ -77,8 +84,74 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
     changeIP(ip, (unsigned long)_2ndNet);
 
     //3. convert to SCION-packet and send
-    convertToSCION(ethernet);
+    u_char newPkt[MAX_ETH_MTU];
+    convertToSCION(ethernet, newPkt);
+
+    //4. send packet
+    int res = sendPacket(packet, "wlan0", ethernet->ether_dhost, ip->ip_dst.s_addr);
+
+    if (res == 0)
+    {
+        log("Send successfully: No.%d\n", count);
+    }
+    else
+        log ("Send failed: No.%d\n", count);
+
     
+
+
+}
+
+void filterIn(u_char *args, const struct pcap_pkthdr *header, const u_char *packet)
+{
+    static int count = 1;                   /* packet counter */
+    
+    /* declare pointers to packet headers */
+    struct sniff_ethernet *ethernet;  /* The ethernet header [1] */
+    struct sniff_ip *ip;              /* The IP header */
+
+    int size_ip;
+    //int size_tcp;
+    
+    printf("\nPacket number %d:\n", count);
+    count++;
+    
+    /* define ethernet header */
+    ethernet = (struct sniff_ethernet*)(packet);
+    
+    /* define/compute ip header offset */
+    ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);
+    size_ip = IP_HL(ip)*4;
+    if (size_ip < 20) {
+        printf("   * Invalid IP header length: %u bytes\n", size_ip);
+        return;
+    }
+
+
+    /* print source and destination IP addresses */
+    printf("       From: %s\n", inet_ntoa(ip->ip_src));
+    printf("         To: %s\n", inet_ntoa(ip->ip_dst));
+
+
+    /* determine protocol */    
+    switch(ip->ip_p) {
+        case IPPROTO_TCP:
+            printf("   Protocol: TCP\n");
+            return;
+        case IPPROTO_UDP:
+            printf("   Protocol: UDP\n");
+            return;
+        case IPPROTO_ICMP:
+            //printf("\nPacket number %d:\n", count);
+            printf("   Protocol: ICMP\n");
+            break;
+        case IPPROTO_IP:
+            printf("   Protocol: IP\n");
+            return;
+        default:
+            printf("   Protocol: unknown\n");
+            return;
+    }
 
 
 }
@@ -87,34 +160,23 @@ void got_packet(u_char *args, const struct pcap_pkthdr *header, const u_char *pa
 
 int main(int argc, char *argv[])
 {
-    if (argc != 3)
+    if (argc != 4)
     {
-        printf("Usage: sudo %s nic1 nic2\n", argv[0]);
+        printf("Usage: sudo %s nic1 nic2 direction(in or out)\n", argv[0]);
         return -1;
     }
 
 	char *dev = argv[1];
-    char errbuf[PCAP_ERRBUF_SIZE];
     char *dev2 = argv[2];
+    char *direction = argv[3];
     int num_pkts = -1;
+    pcap_t *handle;
 
-    /*
-    dev = pcap_lookupdev(errbuf);
-    if (dev == NULL)
-    {
-        flog(stderr, "Couldn't find device: %s\n", errbuf);
-        return 2;
-    }
-    */
 
     //clear log at first
     clearLog();
 
-    pcap_t *handle;
-    struct bpf_program fp;
-    char filter_exp[] = "ip";
-
-
+    char errbuf[PCAP_ERRBUF_SIZE];
     if (pcap_lookupnet(dev, &_net, &_mask, errbuf) == -1) 
     {
          fprintf(stderr, "Can't get netmask for nic1 %s\n", dev);
@@ -149,43 +211,40 @@ int main(int argc, char *argv[])
     log("Second Device: %s\n", dev2);
     log("Address: %s\n", inet_ntoa(net));
     log("Netmask: %s\n", inet_ntoa(mask));
-    
 
-    handle = pcap_open_live(dev, SNAP_LEN, 1, 1000, errbuf);
-    if (handle == NULL)
+    if (strcmp(direction, "out") == 0)
     {
-        fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);
+        handle = pcap_open_live(dev, SNAP_LEN, 1, 1000, errbuf);
+        if (handle == NULL)
+        {
+            fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);;
+            return -1;
+        }
+        setDevice(PCAP_D_OUT, _net, "ip", dev, handle);
+        pcap_loop(handle, num_pkts, filterOut, NULL);
+    }
+    else if (strcmp(direction, "in") == 0)
+    {
+        handle = pcap_open_live(dev2, SNAP_LEN, 1, 1000, errbuf);
+        if (handle == NULL)
+        {
+            fprintf(stderr, "Couldn't open device %s: %s\n", dev, errbuf);;
+            return -1;
+        }
+        setDevice(PCAP_D_IN, _2ndNet, "ip", dev2, handle);
+        pcap_loop(handle, num_pkts, filterIn, NULL);
+    }
+    /*
+    handle2 = pcap_open_live(dev2, SNAP_LEN, 1, 1000, errbuf);
+    if (handle2 == NULL)
+    {
+        fprintf(stderr, "Couldn't open device %s: %s\n", dev2, errbuf);
         return -1;
     }
+    setDevice(_2ndNet, "ip", dev2, handle2);
+    pcap_loop(handle, num_pkts, filter2, NULL);
+    */
 
-    if (pcap_datalink(handle) != DLT_EN10MB)
-    {
-        fprintf(stderr, "%s is not an Ethernet device\n", dev);
-        return -1;
-    }
-
-    //set direction, only capture packets sent out of nic
-    if (pcap_setdirection(handle, PCAP_D_OUT) == -1)
-    {
-        fprintf(stderr, "Set direction of filter failed\n");
-        return -1;
-    }
-
-    if (pcap_compile(handle, &fp, filter_exp, 0, _net) == -1)
-    {
-         fprintf(stderr, "Couldn't parse filter %s: %s\n", filter_exp, pcap_geterr(handle));
-         return -1;
-    }
-
-    
-    if (pcap_setfilter(handle, &fp) == -1) 
-    {
-         fprintf(stderr, "Couldn't install filter %s: %s\n", filter_exp, pcap_geterr(handle));
-         return -1;
-    }
-    
-
-    pcap_loop(handle, num_pkts, got_packet, NULL);
-
+    printf("Capture is running!\n");
     return 0;
 }

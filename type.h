@@ -17,6 +17,9 @@
 /* Length of Nic Dir */
 #define NIC_DIR_LEN 25
 
+/* MAX length of ehternet frame */
+#define MAX_ETH_MTU 1500
+
 /* Ethernet header */
 struct sniff_ethernet {
         u_char  ether_dhost[ETHER_ADDR_LEN];    /* destination host address */
