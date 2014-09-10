@@ -7,12 +7,16 @@
 #include <pcap.h>
 #include <netinet/udp.h>
 #include <netinet/icmp6.h>
+#include <netinet/ether.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
+#include <netinet/udp.h>
 
 
 
-void changeMAC(struct sniff_ethernet *packet, u_char *nicMAC);
+void changeMAC(struct ether_header *packet, u_char *nicMAC, bool isIn);
 
-void changeIP(struct sniff_ip *packet, unsigned long src);
+void changeIP(struct sniff_ip *packet, unsigned long src, bool isIn);
 
 unsigned long getNicIP(char *dev);
 
@@ -20,11 +24,13 @@ void getMAC(char *dev, u_char *MAC);
 
 void checksum(struct sniff_ip *packet);
 
-void convertToSCION(struct sniff_ethernet *packet, u_char *newPkt);
+int convertToSCION(u_char *packet, u_char *newPkt);
 
-void fromSCION(struct sniff_ethernet *packet, u_char *payload);
+int fromSCION(u_char *packet, struct ether_header *eth);
 
-int sendPacket(const u_char *packet, char *dev, u_char *dstMAC, unsigned long daddr);
+int sendPacket(const u_char *packet, int len, char *dev, u_char *dstMAC, unsigned long daddr, int protocol);
+
+int sendRaw(u_char *sendbuf, int len, char *dev, u_char *dstMAC);
 
 void log(const char *fmt, ...);
 
@@ -40,7 +46,7 @@ void printUDP(struct udphdr *udph);
 
 void printICMP(struct icmp6_hdr *icmph);
 
-void printETH(struct sniff_ethernet *eth);
+void printETH(struct ether_header *eth);
 
 void printIP(struct sniff_ip *iph);
 

@@ -42,25 +42,51 @@ char * get_first_hop(uint8_t *path){
 }
 
 
-void changeMAC(struct sniff_ethernet *packet, u_char *nicMAC)
+void changeMAC(struct ether_header *packet, u_char *nicMAC, bool isIn)
 {
-	//chage ethernet source addr
-	log("Change MAC of packet: %x:%x:%x:%x:%x:%x --> ", 
-		packet->ether_shost[0], packet->ether_shost[1], packet->ether_shost[2], packet->ether_shost[3], packet->ether_shost[4], packet->ether_shost[5]);
-	memset(packet->ether_shost, 0, ETHER_ADDR_LEN);
-	memcpy(packet->ether_shost, nicMAC, ETHER_ADDR_LEN);
-	log("%x:%x:%x:%x:%x:%x\n", 
-		packet->ether_shost[0], packet->ether_shost[1], packet->ether_shost[2], packet->ether_shost[3], packet->ether_shost[4], packet->ether_shost[5]);
+    if (isIn)
+    {
+        //chage ethernet destination addr
+        log("Change destination MAC of packet: %x:%x:%x:%x:%x:%x --> ", 
+            packet->ether_dhost[0], packet->ether_dhost[1], packet->ether_dhost[2], packet->ether_dhost[3], packet->ether_dhost[4], packet->ether_dhost[5]);
+        memset(packet->ether_dhost, 0, ETHER_ADDR_LEN);
+        memcpy(packet->ether_dhost, nicMAC, ETHER_ADDR_LEN);
+        log("%x:%x:%x:%x:%x:%x\n", 
+            packet->ether_dhost[0], packet->ether_dhost[1], packet->ether_dhost[2], packet->ether_dhost[3], packet->ether_dhost[4], packet->ether_dhost[5]);
+    }
+    else
+    {
+        //chage ethernet source addr
+        log("Change source MAC of packet: %x:%x:%x:%x:%x:%x --> ", 
+            packet->ether_shost[0], packet->ether_shost[1], packet->ether_shost[2], packet->ether_shost[3], packet->ether_shost[4], packet->ether_shost[5]);
+        memset(packet->ether_shost, 0, ETHER_ADDR_LEN);
+        memcpy(packet->ether_shost, nicMAC, ETHER_ADDR_LEN);
+        log("%x:%x:%x:%x:%x:%x\n", 
+            packet->ether_shost[0], packet->ether_shost[1], packet->ether_shost[2], packet->ether_shost[3], packet->ether_shost[4], packet->ether_shost[5]);
+    }
+	
 }
 
-void changeIP(struct sniff_ip *packet, unsigned long src)
+void changeIP(struct sniff_ip *packet, unsigned long src, bool isIn)
 {
-	log("Change IP of packet: %s --> ", inet_ntoa(packet->ip_src));
-	packet->ip_src.s_addr = src;
-	log("%s\n", inet_ntoa(packet->ip_src));
+    if (isIn)
+    {
+        log("Change destination IP of packet: %s --> ", inet_ntoa(packet->ip_dst));
+        packet->ip_dst.s_addr = src;
+        log("%s\n", inet_ntoa(packet->ip_dst));
 
-	//recalculate ip checksum
-	checksum(packet);
+        //recalculate ip checksum
+        checksum(packet);
+    }
+    else
+    {
+        log("Change IP of packet: %s --> ", inet_ntoa(packet->ip_src));
+        packet->ip_src.s_addr = src;
+        log("%s\n", inet_ntoa(packet->ip_src));
+
+        //recalculate ip checksum
+        checksum(packet);
+    }
 }
 
 
@@ -156,10 +182,13 @@ void checksum(struct sniff_ip *packet)
     //log("checksum: %x --> %x\n", origin, packet->ip_sum);
 }
 
-void convertToSCION(struct sniff_ethernet *packet, u_char *newPkt)
+int convertToSCION(u_char *packet, u_char *newPkt)
 {
     struct sniff_ip *ip;
     ip = (struct sniff_ip*)(packet + SIZE_ETHERNET);
+
+    //printf("convertToSCION\n");
+    //printIP(ip);
 
     uint8_t path[MAX_PATH_LEN];
     struct in_addr tmp;
@@ -168,13 +197,13 @@ void convertToSCION(struct sniff_ethernet *packet, u_char *newPkt)
     if (!path_len)
     {
         log("Get path error!\n");
-        return;
+        return -1;
     }
 
-    const char *payload = (char *)packet;
     
     //4s are for IPv4 , 16 is for ext
-    totalLen=COMMON_HEADER_SIZE + 4 + 4 + path_len + 16 + strlen(payload); 
+    totalLen=COMMON_HEADER_SIZE + 4 + 4 + path_len + 16 + SIZE_ETHERNET + ntohs(ip->ip_len);
+    log("convertToSCION: ip length: %x, total length: %x, MAX: %x\n",ntohs(ip->ip_len), totalLen, MAX_ETH_MTU); 
     int hdrLen=COMMON_HEADER_SIZE + 4 + 4 + path_len;
     uint8_t pkt[totalLen];
 
@@ -184,13 +213,13 @@ void convertToSCION(struct sniff_ethernet *packet, u_char *newPkt)
     if (!inet_pton(AF_INET, inet_ntoa(ip->ip_src), &tmp))
     {
         log("Set source address error\n");
-        return;
+        return -1;
     }
     SPH::setSrcAddr(pkt, HostAddr(HOST_ADDR_IPV4, tmp.s_addr));
     if (!inet_pton(AF_INET, inet_ntoa(ip->ip_dst), &tmp))
     {
         log("Set destination address error\n");
-        return;
+        return -1;
     }
     SPH::setDstAddr(pkt, HostAddr(HOST_ADDR_IPV4,tmp.s_addr));
     SPH::setTotalLen(pkt, totalLen);
@@ -210,7 +239,8 @@ void convertToSCION(struct sniff_ethernet *packet, u_char *newPkt)
     extHdr->hdrLen = 16;//14 other bytes are for extension 
 
     //data after extension header
-    memcpy(pkt + hdrLen + extHdr->hdrLen, payload, strlen(payload));
+    const char *payload = (char *)packet;
+    memcpy(pkt + hdrLen + extHdr->hdrLen, payload, (ntohs(ip->ip_len) + SIZE_ETHERNET));
 
     //extension handling: extension computes HMAC over whole packet without
     //common header, and put tag into 14 bytes of SCION extension (type: 200)
@@ -226,9 +256,65 @@ void convertToSCION(struct sniff_ethernet *packet, u_char *newPkt)
 
     //send_raw(inet_ntoa(ip->ip_src), get_first_hop(path), pkt, totalLen, DATA_PROTO);
     memcpy(newPkt, pkt, totalLen);
+    return totalLen;
 }
 
-int sendPacket(const u_char *packet, char *dev, u_char *dstMAC, unsigned long daddr)
+int fromSCION(u_char *packet, struct ether_header *eth)
+{
+    struct sniff_ip *ip = (struct sniff_ip *)packet;
+    int len = ntohs(ip->ip_len);
+    if (len<COMMON_HEADER_SIZE+sizeof(struct sniff_ip))
+    {
+        perror("packet receive error:");
+        return -1;
+    }
+
+    uint8_t *pkt=((uint8_t *)ip)+sizeof(struct sniff_ip);
+    if(SPH::getTotalLen(pkt) != len - sizeof(struct sniff_ip))
+    {
+        perror("wrong SCION packet");
+        return -1;
+    }
+
+    //that should be handled in while(nextHdr not terminates) check extType... 
+    if (SPH::getNextHdr(pkt)!=200)
+    {
+        perror ("truncation attack (ext is dropped)");
+        return -1;
+    }
+
+    unsigned char received_mac[14];
+    int hdrLen=SPH::getHdrLen(pkt);
+
+    //copy MAC (14 bytes of our extension)
+    memcpy(received_mac,pkt+hdrLen+2,14);
+    memset(pkt+hdrLen+2,'\x00',14);
+    printf("Received MAC:\n");
+    for (int i=0;i<14;i++)
+        printf("%02x",received_mac[i]);
+    unsigned char* digest;
+    digest = HMAC(EVP_sha1(),KEY,strlen(KEY),(unsigned char*)pkt+8,
+            SPH::getTotalLen(pkt)-8, NULL, NULL);
+    printf("\nComputed MAC:\n");
+    for (int i=0;i<14;i++)
+        printf("%02x",digest[i]);
+    if (!memcmp(received_mac,digest,14))
+    {
+        printf("\nVrfy: OK\n");
+        scionExtensionHeader *extHdr = (scionExtensionHeader*)(pkt + hdrLen);
+        //printf("Data is: %s\n", pkt + hdrLen + extHdr->hdrLen);
+        memset(eth, 0, MAX_ETH_MTU);
+        int size = len - sizeof(struct sniff_ip) - hdrLen - extHdr->hdrLen;
+        memcpy(eth, (pkt + hdrLen + extHdr->hdrLen), size);
+        return size;
+    }
+    else
+        printf("\nVrfy: FAIL\n");
+    return -1;
+}
+
+
+int sendPacket(const u_char *packet, int len, char *dev, u_char *dstMAC, unsigned long daddr, int protocol)
 {
     /*
     int fd;
@@ -262,7 +348,7 @@ int sendPacket(const u_char *packet, char *dev, u_char *dstMAC, unsigned long da
     */
     int tx_len = 0;
     u_char sendbuf[MAX_ETH_MTU];
-    struct ether_header *eh = (struct ether_header *) sendbuf;
+    struct sniff_ethernet *eh = (struct sniff_ethernet *) sendbuf;
     u_char srcMAC[ETHER_ADDR_LEN];
 
     getMAC(dev, srcMAC);
@@ -286,32 +372,38 @@ int sendPacket(const u_char *packet, char *dev, u_char *dstMAC, unsigned long da
     // eh->ether_dhost[5] = dstMAC[5];
     /* Ethertype field */
     eh->ether_type = htons(ETH_P_IP);
-    tx_len += sizeof(struct ether_header);
+    tx_len += SIZE_ETHERNET;
 
-    struct iphdr *iph = (struct iphdr *) (sendbuf + sizeof(struct ether_header));
+    struct sniff_ip *iph = (struct sniff_ip *) (sendbuf + SIZE_ETHERNET);
     /* IP Header */
-    iph->ihl = 5;
-    iph->version = 4;
-    iph->tos = 0;
-    iph->ttl = 64;
-    iph->frag_off = 0;       /* no fragment */
-    iph->protocol = DATA_PROTO;
+    iph->ip_vhl = ((4 << 4) | 5) & 0xff;
+    iph->ip_tos = 0;
+    iph->ip_ttl = 64;
+    iph->ip_off = 0;       /* no fragment */
+    iph->ip_p = protocol;
     //iph->protocol = IPPROTO_ICMP; //for test
-    iph->check = 0; 
+    iph->ip_sum = 0; 
     /* Source IP address, can be spoofed */
-    iph->saddr = getNicIP(dev);
+    iph->ip_src.s_addr = getNicIP(dev);
     // iph->saddr = inet_addr("192.168.0.112");
     /* Destination IP address */
-    iph->daddr = daddr;
+    iph->ip_dst.s_addr = daddr;
 
-    int len = sizeof(packet) / sizeof(u_char);
-    iph->tot_len = htons(sizeof(struct iphdr) + len);
-    tx_len += sizeof(struct iphdr);
+    //int len = sizeof(packet) / sizeof(u_char);
+    iph->ip_len = htons(sizeof(struct sniff_ip) + len);
+    tx_len += sizeof(struct sniff_ip);
 
     memcpy((sendbuf + tx_len), packet, len);
 
     tx_len += len;
-    checksum((struct sniff_ip *)iph);
+    checksum(iph);
+
+
+    //try
+
+    // printf("haaaaaaaaa\n");
+    // struct sniff_ip *temp = (struct sniff_ip *)iph;
+    // printIP(temp);
     
     /*
     pcap_t *handle;
@@ -331,6 +423,12 @@ int sendPacket(const u_char *packet, char *dev, u_char *dstMAC, unsigned long da
     pcap_close(handle);
     */
 
+    return sendRaw(sendbuf, tx_len, dev, dstMAC);
+    
+}
+
+int sendRaw(u_char *sendbuf, int len, char *dev, u_char *dstMAC)
+{
     int sockfd;
     /* Open RAW socket to send on */
     if ((sockfd = socket(AF_PACKET, SOCK_RAW, IPPROTO_RAW)) == -1) {
@@ -356,15 +454,22 @@ int sendPacket(const u_char *packet, char *dev, u_char *dstMAC, unsigned long da
     // socket_address.sll_addr[4] = dstMAC[0];
     // socket_address.sll_addr[5] = dstMAC[0];
     memcpy(socket_address.sll_addr, dstMAC, ETHER_ADDR_LEN);
+
+    //try
+
+    printf("Send Raw\n");
+    struct ether_header *eh = (struct ether_header *)sendbuf;
+    printETH(eh);
+    struct sniff_ip *temp = (struct sniff_ip *)(sendbuf + SIZE_ETHERNET);
+    printIP(temp);
  
     /* Send packet */
-    if (sendto(sockfd, sendbuf, tx_len, 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
+    if (sendto(sockfd, sendbuf, len, 0, (struct sockaddr*)&socket_address, sizeof(struct sockaddr_ll)) < 0)
     {
         printf("Send failed\n");
         return -1;
     }
     return 0;
-    
 }
 
 void setDevice(pcap_direction_t direction, bpf_u_int32 net, char *filter_exp, char *dev, pcap_t *handle)
@@ -429,33 +534,33 @@ void printMAC(u_char *mac)
 void printTCP(struct sniff_tcp *packet)
 {
     printf("TCP Header:\n");
-    printf("\tSource port: 0x%x\n", packet->th_sport);
-    printf("\tDestination prot: 0x%x\n", packet->th_dport);
-    printf("\tSeq Number: 0x%x\n", packet->th_seq);
-    printf("\tAck Number: 0x%x\n", packet->th_ack);
+    printf("\tSource port: 0x%x\n", ntohs(packet->th_sport));
+    printf("\tDestination prot: 0x%x\n", ntohs(packet->th_dport));
+    printf("\tSeq Number: 0x%x\n", ntohs(packet->th_seq));
+    printf("\tAck Number: 0x%x\n", ntohs(packet->th_ack));
     printf("\tData offset: 0x%x\n", TH_OFF(packet));
-    printf("\tWindow size: 0x%x\n", packet->th_win);
-    printf("\tChecksum: 0x%x\n", packet->th_sum);
+    printf("\tWindow size: 0x%x\n", ntohs(packet->th_win));
+    printf("\tChecksum: 0x%x\n", ntohs(packet->th_sum));
 }
 
 void printUDP(struct udphdr* udph)
 {
     printf("UDP Header:\n");
-    printf("\tSource port: 0x%x\n", udph->source);
-    printf("\tDestination port: 0x%x\n", udph->dest);
-    printf("\tLength: 0x%x\n", udph->len);
-    printf("\tChecksum: 0x%x\n", udph->check);
+    printf("\tSource port: 0x%x\n", ntohs(udph->source));
+    printf("\tDestination port: 0x%x\n", ntohs(udph->dest));
+    printf("\tLength: 0x%x\n", ntohs(udph->len));
+    printf("\tChecksum: 0x%x\n", ntohs(udph->check));
 }
 
 void printICMP(struct icmp6_hdr *icmph)
 {
     printf("ICMP Header:\n");
-    printf("\tType: 0x%x\n", icmph->icmp6_type);
-    printf("\tCode: 0x%x\n", icmph->icmp6_code);
-    printf("\tChecksum: 0x%x\n", icmph->icmp6_cksum);
+    printf("\tType: 0x%x\n", ntohs(icmph->icmp6_type));
+    printf("\tCode: 0x%x\n", ntohs(icmph->icmp6_code));
+    printf("\tChecksum: 0x%x\n", ntohs(icmph->icmp6_cksum));
 }
 
-void printETH(struct sniff_ethernet *eth)
+void printETH(struct ether_header *eth)
 {
     printf("Ethernet Header:\n");
     printf("\tFrom: ");
@@ -471,9 +576,11 @@ void printIP(struct sniff_ip *iph)
     printf("\tHeader Length: 0x%x\n", IP_HL(iph));
     printf("\tVersion: 0x%x\n", IP_V(iph));
     printf("\tService: 0x%x\n", iph->ip_tos);
-    printf("\tTotal Length: 0x%x", iph->ip_len);
-    printf("\tID: 0x%x\n", iph->ip_id);
-    printf("\tChecksum: 0x%x\n", iph->ip_sum);
+    printf("\tTotal Length: 0x%x", ntohs(iph->ip_len));
+    printf("\tID: 0x%x\n", ntohs(iph->ip_id));
+    printf("\tFragment Flag: 0x%x\n", ntohs(iph->ip_off));
+    printf("\tChecksum: 0x%x\n", ntohs(iph->ip_sum));
+    printf("\tTTL: 0x%x\n", iph->ip_ttl);
     printf("\tFrom: %s\n", inet_ntoa(iph->ip_src));
     printf("\tTo: %s\n", inet_ntoa(iph->ip_dst));
 }

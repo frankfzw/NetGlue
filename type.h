@@ -20,6 +20,16 @@
 /* MAX length of ehternet frame */
 #define MAX_ETH_MTU 1500
 
+/* SCION defined protocol number */
+#ifndef DATA_PROTO
+#define DATA_PROTO 40
+#endif
+
+#ifndef CONTROL_PROTO
+#define CONTROL_PROTO 50
+#endif
+
+
 /* Ethernet header */
 struct sniff_ethernet {
         u_char  ether_dhost[ETHER_ADDR_LEN];    /* destination host address */
