@@ -24,4 +24,8 @@ How To Use:
 
 Since there is no multi thread in my code, you should run ./capture nic1 nic2 in and ./capture nic1 nic2 out manualy :(
 
-Bugs: If the frame captured is too big, the socket statck will smash. Because I have to add a huge SCION head, another IP header and another Ethernet header. I haven't found out how to split the packet yet.
+Bugs:
+
+1. If the frame captured is too big, the socket statck will smash. Because I have to add a huge SCION head, another IP header and another Ethernet header. I haven't found out how to split the packet yet.
+
+2. If there is NAT on your NIC, it may not work!
