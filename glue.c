@@ -483,7 +483,7 @@ void setDevice(pcap_direction_t direction, bpf_u_int32 net, char *filter_exp, ch
     }
 
     //set direction, only capture packets sent out of nic
-    if (pcap_setdirection(handle, PCAP_D_OUT) == -1)
+    if (pcap_setdirection(handle, direction) == -1)
     {
         fprintf(stderr, "Set direction of filter failed\n");
         return;
